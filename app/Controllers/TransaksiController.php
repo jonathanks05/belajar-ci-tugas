@@ -5,24 +5,32 @@ namespace App\Controllers;
 use App\Models\TransactionModel;
 use App\Models\TransactionDetailModel;
 use Dompdf\Dompdf;
+use Dompdf\Options;
 
 class TransaksiController extends BaseController
 {
     protected $cart;
-    protected $url = "https://api.rajaongkir.com/starter/";
-    protected $apiKey = "824675a7a903c740f77232a9926a4c4f";
     protected $transaction;
     protected $transaction_detail;
+    protected $client; // Guzzle HTTP Client
+    protected $apiKey;
 
-    function __construct()
+    public function __construct()
     {
         helper('number');
         helper('form');
         $this->cart = \Config\Services::cart();
         $this->transaction = new TransactionModel();
         $this->transaction_detail = new TransactionDetailModel();
+        
+        // Inisialisasi Guzzle Client
+        $this->client = new \GuzzleHttp\Client();
+        
+        // Ambil API Key dari file .env. Pastikan Anda sudah mengaturnya.
+        $this->apiKey = env('COST_KEY'); 
     }
 
+    // Menampilkan halaman keranjang (sudah benar)
     public function index()
     {
         $data['items'] = $this->cart->contents();
@@ -30,19 +38,21 @@ class TransaksiController extends BaseController
         return view('v_keranjang', $data);
     }
 
+    // Menambahkan item ke keranjang (sudah benar)
     public function cart_add()
     {
-        $this->cart->insert(array(
-            'id'        => $this->request->getPost('id'),
-            'qty'       => 1,
-            'price'     => $this->request->getPost('harga'),
-            'name'      => $this->request->getPost('nama'),
-            'options'   => array('foto' => $this->request->getPost('foto'))
-        ));
-        session()->setflashdata('success', 'Produk berhasil ditambahkan ke keranjang. (<a href="' . base_url() . 'keranjang">Lihat</a>)');
+        $this->cart->insert([
+            'id'      => $this->request->getPost('id'),
+            'qty'     => 1,
+            'price'   => $this->request->getPost('harga'),
+            'name'    => $this->request->getPost('nama'),
+            'options' => ['foto' => $this->request->getPost('foto')]
+        ]);
+        session()->setflashdata('success', 'Produk berhasil ditambahkan ke keranjang. (<a href="' . base_url('keranjang') . '">Lihat</a>)');
         return redirect()->to(base_url('/'));
     }
 
+    // Mengosongkan keranjang (sudah benar)
     public function cart_clear()
     {
         $this->cart->destroy();
@@ -50,194 +60,150 @@ class TransaksiController extends BaseController
         return redirect()->to(base_url('keranjang'));
     }
 
+    // Mengedit kuantitas di keranjang (sudah benar)
     public function cart_edit()
     {
         $i = 1;
         foreach ($this->cart->contents() as $value) {
-            $this->cart->update(array(
+            $this->cart->update([
                 'rowid' => $value['rowid'],
                 'qty'   => $this->request->getPost('qty' . $i++)
-            ));
+            ]);
         }
-
         session()->setflashdata('success', 'Keranjang Berhasil Diedit');
         return redirect()->to(base_url('keranjang'));
     }
 
+    // Menghapus item dari keranjang (sudah benar)
     public function cart_delete($rowid)
     {
         $this->cart->remove($rowid);
-        session()->setflashdata('success', 'Keranjang Berhasil Dihapus');
+        session()->setflashdata('success', 'Item Berhasil Dihapus dari Keranjang');
         return redirect()->to(base_url('keranjang'));
     }
 
+    // Menampilkan halaman checkout
     public function checkout()
     {
         $data['items'] = $this->cart->contents();
         $data['total'] = $this->cart->total();
-        $provinsi = $this->rajaongkir('province');
-				$data['provinsi'] = json_decode($provinsi)->rajaongkir->results;
-
-
+        // Pengambilan data provinsi/kota sekarang dilakukan via AJAX, 
+        // jadi tidak perlu dimuat di sini.
         return view('v_checkout', $data);
     }
 
-    public function getCity()
+    // Mencari lokasi tujuan (untuk AJAX di halaman checkout)
+    public function getLocation()
     {
-        if ($this->request->isAJAX()) {
-            $id_province = $this->request->getGet('id_province');
-            $data = $this->rajaongkir('city', $id_province);
-            return $this->response->setJSON($data);
+        $search = $this->request->getGet('search');
+        try {
+            $response = $this->client->request(
+                'GET', 
+                'https://rajaongkir.komerce.id/api/v1/destination/domestic-destination', [
+                    'query' => [
+                        'search' => $search,
+                        'limit' => 50,
+                    ],
+                    'headers' => [
+                        'accept' => 'application/json',
+                        'key' => $this->apiKey,
+                    ],
+                ]
+            );
+            $body = json_decode($response->getBody(), true); 
+            return $this->response->setJSON($body['data']);
+        } catch (\Exception $e) {
+            return $this->response->setJSON(['error' => $e->getMessage()])->setStatusCode(500);
         }
     }
 
+    // Menghitung ongkos kirim (untuk AJAX di halaman checkout)
     public function getCost()
-    {
-        if ($this->request->isAJAX()) {
-            $origin = $this->request->getGet('origin');
-            $destination = $this->request->getGet('destination');
-            $weight = $this->request->getGet('weight');
-            $courier = $this->request->getGet('courier');
-            $data = $this->rajaongkircost($origin, $destination, $weight, $courier);
-            return $this->response->setJSON($data);
+    { 
+        $destination = $this->request->getGet('destination');
+        try {
+            $response = $this->client->request(
+                'POST', 
+                'https://rajaongkir.komerce.id/api/v1/calculate/domestic-cost', [
+                    'multipart' => [
+                        ['name' => 'origin', 'contents' => '64999'], // Asal: PEDURUNGAN TENGAH
+                        ['name' => 'destination', 'contents' => $destination],
+                        ['name' => 'weight', 'contents' => '1000'], // Berat: 1000 gram
+                        ['name' => 'courier', 'contents' => 'jne'], // Kurir: JNE
+                    ],
+                    'headers' => [
+                        'accept' => 'application/json',
+                        'key' => $this->apiKey,
+                    ],
+                ]
+            );
+            $body = json_decode($response->getBody(), true); 
+            return $this->response->setJSON($body['data']);
+        } catch (\Exception $e) {
+            return $this->response->setJSON(['error' => $e->getMessage()])->setStatusCode(500);
         }
     }
 
-    private function rajaongkircost($origin, $destination, $weight, $courier)
-    {
-        $curl = curl_init();
-
-        curl_setopt_array($curl, array(
-            CURLOPT_URL => "https://api.rajaongkir.com/starter/cost",
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_ENCODING => "",
-            CURLOPT_MAXREDIRS => 10,
-            CURLOPT_TIMEOUT => 30,
-            CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
-            CURLOPT_CUSTOMREQUEST => "POST",
-            CURLOPT_POSTFIELDS => "origin=" . $origin . "&destination=" . $destination . "&weight=" . $weight . "&courier=" . $courier,
-            CURLOPT_HTTPHEADER => array(
-                "content-type: application/x-www-form-urlencoded",
-                "key: " . $this->apiKey,
-            ),
-        ));
-
-        $response = curl_exec($curl);
-        $err = curl_error($curl);
-
-        curl_close($curl);
-
-        return $response;
-    }
-
-
-    private function rajaongkir($method, $id_province = null)
-    {
-        $endPoint = $this->url . $method;
-
-        if ($id_province != null) {
-            $endPoint = $endPoint . "?province=" . $id_province;
-        }
-
-        $curl = curl_init();
-
-        curl_setopt_array($curl, array(
-            CURLOPT_URL => $endPoint,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_ENCODING => "",
-            CURLOPT_MAXREDIRS => 10,
-            CURLOPT_TIMEOUT => 30,
-            CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
-            CURLOPT_CUSTOMREQUEST => "GET",
-            CURLOPT_HTTPHEADER => array(
-                "key: " . $this->apiKey
-            ),
-        ));
-
-        $response = curl_exec($curl);
-        $err = curl_error($curl);
-
-        curl_close($curl);
-
-        return $response;
-    }
+    // Memproses pembelian (sudah benar)
     public function buy()
-{
-    if ($this->request->getPost()) { 
-        $dataForm = [
-            'username' => $this->request->getPost('username'),
-            'total_harga' => $this->request->getPost('total_harga'),
-            'alamat' => $this->request->getPost('alamat'),
-            'ongkir' => $this->request->getPost('ongkir'),
-            'status' => 0,
-            'created_at' => date("Y-m-d H:i:s"),
-            'updated_at' => date("Y-m-d H:i:s")
-        ];
-
-        $this->transaction->insert($dataForm);
-
-        $last_insert_id = $this->transaction->getInsertID();
-
-        foreach ($this->cart->contents() as $value) {
-            $dataFormDetail = [
-                'transaction_id' => $last_insert_id,
-                'product_id' => $value['id'],
-                'jumlah' => $value['qty'],
-                'diskon' => 0,
-                'subtotal_harga' => $value['qty'] * $value['price'],
+    {
+        if ($this->request->getPost()) { 
+            $dataForm = [
+                'username' => $this->request->getPost('username'),
+                'total_harga' => $this->request->getPost('total_harga'),
+                'alamat' => $this->request->getPost('alamat'),
+                'ongkir' => $this->request->getPost('ongkir'),
+                'status' => 0,
                 'created_at' => date("Y-m-d H:i:s"),
                 'updated_at' => date("Y-m-d H:i:s")
             ];
 
-            $this->transaction_detail->insert($dataFormDetail);
+            $this->transaction->insert($dataForm);
+            $last_insert_id = $this->transaction->getInsertID();
+
+            foreach ($this->cart->contents() as $value) {
+                $dataFormDetail = [
+                    'transaction_id' => $last_insert_id,
+                    'product_id' => $value['id'],
+                    'jumlah' => $value['qty'],
+                    'diskon' => 0,
+                    'subtotal_harga' => $value['qty'] * $value['price'],
+                    'created_at' => date("Y-m-d H:i:s"),
+                    'updated_at' => date("Y-m-d H:i:s")
+                ];
+                $this->transaction_detail->insert($dataFormDetail);
+            }
+            $this->cart->destroy();
+            return redirect()->to(base_url('profile'));
         }
-
-        $this->cart->destroy();
- 
-        return redirect()->to(base_url('profile'));
     }
-}
 
-public function updateStatus()
-{
-    $id_transaksi = $this->request->getPost('id_transaksi');
-    $status = $this->request->getPost('status');
+    // Mengupdate status transaksi (sudah benar)
+    public function updateStatus()
+    {
+        $id_transaksi = $this->request->getPost('id_transaksi');
+        $status = $this->request->getPost('status');
+        $data = ['status' => $status];
 
-    $data = [
-        'status' => $status
-    ];
-
-    if ($this->transaction->update($id_transaksi, $data)) {
-        session()->setFlashdata('success', 'Data Berhasil Diubah.');
-        return redirect()->to('/transaksi'); // Redirect ke halaman yang sesuai
-    } else {
-        session()->setFlashdata('error', 'Gagal memperbarui status transaksi.');
-        return redirect()->back(); // Kembali ke halaman sebelumnya
+        if ($this->transaction->update($id_transaksi, $data)) {
+            session()->setFlashdata('success', 'Data Berhasil Diubah.');
+            return redirect()->to('/transaksi');
+        } else {
+            session()->setFlashdata('error', 'Gagal memperbarui status transaksi.');
+            return redirect()->back();
+        }
     }
-}
 
-
-public function download()
+    // Mengunduh laporan transaksi (sudah benar)
+    public function download()
     {
         $transactions = $this->transaction->findAll();
-
         $html = view('v_transaksiPDF', ['transactions' => $transactions]);
-
         $filename = date('y-m-d-H-i-s') . '-transaksi';
-
-        // instantiate and use the dompdf class
         $dompdf = new Dompdf();
-
-        // load HTML content
         $dompdf->loadHtml($html);
-
-        // (optional) setup the paper size and orientation
         $dompdf->setPaper('A4', 'portrait');
-
-        // render html as PDF
         $dompdf->render();
-
-        // output the generated pdf
         $dompdf->stream($filename);
     }
 }

@@ -11,7 +11,7 @@ use App\Models\TransactionDetailModel;
 
 class ApiController extends ResourceController
 {
-    protected $apiKey = "ef635XbLi09420MgcvNp00";
+    protected $apiKey = "6rFKiMugf8efbdc0234162bczrQno9Le";
     protected $user;
     protected $transaction;
     protected $transaction_detail;
