@@ -1,4 +1,5 @@
 <!-- ======= Sidebar ======= -->
+ 
 <aside id="sidebar" class="sidebar">
 
     <ul class="sidebar-nav" id="sidebar-nav">
@@ -25,6 +26,14 @@
                     <span>Produk</span>
                 </a>
             </li><!-- End Produk Nav -->
+
+            <li class="nav-item">
+            <a class="nav-link <?php echo (uri_string() == 'kategori') ? "" : "collapsed" ?>" href="kategori">
+        <i class="bi bi-tags"></i>
+        <span>Produk Kategori</span>
+    </a>
+</li><!-- End Produk Kategori Nav -->
+
         <?php
         }
         ?>

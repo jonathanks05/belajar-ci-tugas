@@ -1,5 +1,6 @@
 <?php
-
+//Nama: Jonathan Karel
+//NIM: A11.2020.13053
 use App\Controllers\ProdukController;
 use CodeIgniter\Router\RouteCollection;
 
@@ -20,6 +21,24 @@ $routes->group('produk',['filter' => 'auth'], function ($routes) {
     $routes->get('delete/(:any)', 'ProdukController::delete/$1');
     $routes->get('download', 'ProdukController::download');
 });
+
+$routes->group('kategori', ['filter' => 'auth'], function ($routes) { 
+    // URL: /kategori
+    $routes->get('', 'KategoriController::index');
+
+    // URL: /kategori/create (untuk form tambah)
+    $routes->post('create', 'KategoriController::create');
+
+    // URL: /kategori/update/1 (untuk form ubah)
+    $routes->post('update/(:num)', 'KategoriController::update/$1');
+
+    // URL: /kategori/delete/1 (untuk tombol hapus)
+    // Menggunakan delete() lebih aman jika Anda pakai form dengan method spoofing
+    $routes->delete('delete/(:num)', 'KategoriController::delete/$1'); 
+    // Jika tombol hapus Anda hanya link <a> biasa, gunakan get()
+    // $routes->get('delete/(:num)', 'KategoriController::delete/$1');
+});
+
 
 $routes->post('update_status', 'TransaksiController::updateStatus');
 $routes->get('download', 'TransaksiController::download');

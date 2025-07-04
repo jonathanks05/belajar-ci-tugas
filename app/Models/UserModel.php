@@ -1,4 +1,6 @@
 <?php
+//Nama: Jonathan Karel
+//NIM: A11.2020.13053
 
 namespace App\Models;
 
